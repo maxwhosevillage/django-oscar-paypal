@@ -57,6 +57,15 @@ Tests
 Changelog
 ---------
 
+2.1.0 (unreleased)
+------------------------------------
+* Add support for Django 5.2.
+* Fix deprecated `allow_tags` usage in admin display methods.
+* Add missing dependencies to requirements.txt (django-localflavor, paypal-checkout-serversdk, requests).
+* Update tox.ini to test with Django 3.2, 4.2, and 5.2.
+* Add support for Python 3.10 and 3.11.
+* Update STORAGES setting to include 'staticfiles' configuration for Django 5.2 compatibility.
+
 2.0.0 (released December 20th, 2019)
 ------------------------------------
 * Add support for Oscar 2.0 and Django 2.2.

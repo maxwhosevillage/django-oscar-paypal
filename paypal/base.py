@@ -1,6 +1,7 @@
 from urllib.parse import parse_qsl
 
 from django.db import models
+from django.utils.safestring import mark_safe
 from django.utils.translation import gettext_lazy as _
 
 
@@ -21,12 +22,10 @@ class ResponseModel(models.Model):
 
     def request(self):
         request_params = self.context
-        return self._as_dl(request_params)
-    request.allow_tags = True
+        return mark_safe(self._as_dl(request_params))
 
     def response(self):
-        return self._as_dl(self.context)
-    response.allow_tags = True
+        return mark_safe(self._as_dl(self.context))
 
     def _as_table(self, params):
         rows = []
