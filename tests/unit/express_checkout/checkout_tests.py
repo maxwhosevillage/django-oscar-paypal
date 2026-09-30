@@ -459,6 +459,10 @@ class ButtonsTagTests(TestCase):
         assert 'disable-funding=card%2Csepa%2Cvenmo' in html
         assert 'data-terms-checkbox="#agb"' in html
         assert reverse('express-checkout-capture-order') in html
+        # Terms are enforced by disabling the buttons, not by rejecting the click
+        # (which would let PayPal open its popup window first)
+        assert 'actions.disable()' in html
+        assert 'actions.reject' not in html
 
     @override_settings(PAYPAL_CLIENT_ID='')
     def test_renders_nothing_without_credentials(self):

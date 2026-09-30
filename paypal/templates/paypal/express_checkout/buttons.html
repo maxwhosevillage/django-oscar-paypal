@@ -38,13 +38,31 @@
 
     window.paypalSdk.Buttons({
         style: JSON.parse(document.getElementById('paypal-button-style').textContent),
-        onClick: function (data, actions) {
+        // The buttons stay disabled until the terms checkbox is ticked. Rejecting
+        // the click in onClick instead would be too late: PayPal has opened its
+        // popup window by then (visible in Firefox) and only closes it again.
+        onInit: function (data, actions) {
+            if (!terms) {
+                return;
+            }
+            function sync() {
+                if (terms.checked) {
+                    actions.enable();
+                } else {
+                    actions.disable();
+                }
+            }
+            sync();
+            terms.addEventListener('change', sync);
+        },
+        // Deliberately synchronous and without a return value, so PayPal does
+        // not treat it as asynchronous validation. Fires on disabled buttons too.
+        onClick: function () {
             errorBox.hidden = true;
             if (terms && !terms.checked) {
+                terms.scrollIntoView({block: 'center', behavior: 'smooth'});
                 terms.reportValidity();
-                return actions.reject();
             }
-            return actions.resolve();
         },
         createOrder: function () {
             // Errors are shown here rather than in onError: the SDK does not
