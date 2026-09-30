@@ -316,6 +316,14 @@ class PurchaseUnitTests(TestCase):
         unit = gateway.build_purchase_unit(self.basket, 'EUR', D('32.00'), surcharges=[Surcharge()])
         assert unit['amount']['breakdown']['handling'] == {'currency_code': 'EUR', 'value': '2.00'}
 
+    def test_only_image_urls_paypal_accepts_are_sent(self):
+        assert gateway.IMAGE_URL_RE.fullmatch('https://www.example.com/media/products/181/14416_6370_04.jpg')
+        # Rejected by PayPal's schema: port, percent-encoding, no image extension
+        assert not gateway.IMAGE_URL_RE.fullmatch('https://localhost:8012/media/a.jpg')
+        assert not gateway.IMAGE_URL_RE.fullmatch('https://www.example.com/media/1100%20C187_10_0.jpg')
+        assert not gateway.IMAGE_URL_RE.fullmatch('https://www.example.com/media/a.webp')
+        assert not gateway.IMAGE_URL_RE.fullmatch('http://www.example.com/media/a.jpg')
+
     def test_long_values_are_truncated(self):
         from oscar.apps.order.models import ShippingAddress
         address = ShippingAddress(first_name='A' * 200, last_name='B' * 200, line1='Straße 1', line2='Hinterhaus',
@@ -388,6 +396,40 @@ class AfterSaleTests(TestCase):
         assert last_json(responses, '/refund') == {
             'amount': {'currency_code': 'EUR', 'value': '10.00'}, 'note_to_payer': 'Retoure'}
         assert Transaction.objects.get().refund_id == 'REFUND1'
+
+    @responses.activate
+    def test_refund_uses_given_request_id(self):
+        mock_token(responses)
+        responses.add(responses.POST, f'{API}/v2/payments/captures/{CAPTURE_ID}/refund',
+                      json={'id': 'REFUND1', 'status': 'COMPLETED'})
+        facade.refund(self.txn, amount=D('10'), request_id='refund-100001-line-7')
+        call = [c for c in responses.calls if c.request.url.endswith('/refund')][0]
+        assert call.request.headers['PayPal-Request-Id'] == 'refund-100001-line-7'
+
+    @responses.activate
+    def test_partial_capture_of_authorization(self):
+        mock_token(responses)
+        self.txn.intent = 'AUTHORIZE'
+        self.txn.authorization_id = 'AUTH1'
+        self.txn.capture_id = None
+        self.txn.save()
+        responses.add(responses.POST, f'{API}/v2/payments/authorizations/AUTH1/capture',
+                      json={'id': 'CAP2', 'status': 'COMPLETED'})
+        facade.capture_authorization(self.txn, amount=D('14.95'))
+        assert last_json(responses, '/capture') == {
+            'final_capture': True, 'amount': {'currency_code': 'EUR', 'value': '14.95'}, 'invoice_id': '100001'}
+        txn = Transaction.objects.get()
+        assert txn.capture_id == 'CAP2'
+        assert txn.capture_status == 'COMPLETED'
+
+    @responses.activate
+    def test_void_authorization(self):
+        mock_token(responses)
+        self.txn.authorization_id = 'AUTH1'
+        self.txn.save()
+        responses.add(responses.POST, f'{API}/v2/payments/authorizations/AUTH1/void', status=204)
+        facade.void_authorization(self.txn)
+        assert Transaction.objects.get().status == 'VOIDED'
 
     @responses.activate
     def test_add_tracking(self):

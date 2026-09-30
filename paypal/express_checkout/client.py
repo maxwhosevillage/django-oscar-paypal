@@ -44,6 +44,9 @@ class PayPalError(Exception):
         parts = [self.message]
         if self.issue:
             parts.append(f'issue={self.issue}')
+        fields = [detail['field'] for detail in self.details if detail.get('field')]
+        if fields:
+            parts.append(f'fields={",".join(fields)}')
         if self.debug_id:
             parts.append(f'debug_id={self.debug_id}')
         return ' '.join(parts)

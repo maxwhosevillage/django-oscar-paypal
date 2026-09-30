@@ -130,12 +130,19 @@ def complete_payment(txn, processor=None):
     return txn
 
 
-def capture_authorization(txn, processor=None):
-    result = (processor or PaymentProcessor()).capture_authorization(txn.authorization_id, txn.order_number)
+def capture_authorization(txn, amount=None, processor=None):
+    """
+    Take the money for an authorized order, e.g. when it ships. With ``amount``
+    only that part is captured and the rest of the authorization is released.
+    """
+    result = (processor or PaymentProcessor()).capture_authorization(
+        txn.authorization_id, amount=amount, currency=txn.currency, invoice_id=txn.order_number)
     txn.capture_id = result['id']
     txn.capture_status = result['status']
     txn.status = Transaction.COMPLETED
     txn.save()
+    logger.info('PayPal authorization %s (order #%s): captured %s, %s',
+                txn.authorization_id, txn.order_number, amount or 'all', result['status'])
     return txn
 
 
@@ -143,16 +150,20 @@ def void_authorization(txn, processor=None):
     (processor or PaymentProcessor()).void_authorization(txn.authorization_id)
     txn.status = Transaction.VOIDED
     txn.save()
+    logger.info('PayPal authorization %s (order #%s): voided', txn.authorization_id, txn.order_number)
     return txn
 
 
-def refund(txn, amount=None, note_to_payer=None, processor=None):
+def refund(txn, amount=None, note_to_payer=None, request_id=None, processor=None):
     """
     Refund (part of) a captured payment. Returns PayPal's refund resource.
+
+    Pass a ``request_id`` that identifies what is being refunded (e.g. the
+    order line): PayPal then executes a repeated call only once.
     """
     result = (processor or PaymentProcessor()).refund_capture(
         txn.capture_id, amount=amount, currency=txn.currency, note_to_payer=note_to_payer,
-        request_id=str(uuid.uuid4()))
+        request_id=request_id or str(uuid.uuid4()))
     txn.refund_id = result['id']
     txn.save()
     logger.info('PayPal capture %s (order #%s): refunded %s', txn.capture_id, txn.order_number, amount or 'all')

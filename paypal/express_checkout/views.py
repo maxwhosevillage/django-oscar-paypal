@@ -126,6 +126,7 @@ class CaptureOrderView(JsonCheckoutMixin, PaymentDetailsView):
 
     def handle_payment(self, order_number, total, **kwargs):
         txn = self.txn
+        order_number = str(order_number)
         if txn.order_number and txn.order_number != order_number:
             logger.warning('PayPal order %s was created for order #%s, placing #%s',
                            txn.order_id, txn.order_number, order_number)

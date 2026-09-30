@@ -3,6 +3,7 @@ Builds PayPal Orders v2 payloads from Oscar objects and wraps the API calls.
 
 API reference: https://developer.paypal.com/docs/api/orders/v2/
 """
+import re
 from decimal import ROUND_HALF_UP
 from decimal import Decimal as D
 
@@ -31,6 +32,9 @@ USER_ACTION_PAY_NOW = 'PAY_NOW'
 # PayPal field length limits
 MAX_TEXT = 127
 MAX_NAME = 300
+# PayPal rejects the whole order if an image URL does not match this pattern
+# (no port, no percent-encoding, image extension required), so others are left out.
+IMAGE_URL_RE = re.compile(r'https:[/.\w\s|-]*\.(?:jpg|gif|png|jpeg|JPG|GIF|PNG|JPEG)')
 
 
 def format_description(description):
@@ -107,7 +111,7 @@ def build_items(basket, currency, absolute_uri=None):
             original = getattr(image, 'original', None)
             if original:
                 image_url = absolute_uri(original.url)
-                if image_url.startswith('https://'):
+                if IMAGE_URL_RE.fullmatch(image_url) and len(image_url) <= 2048:
                     item['image_url'] = image_url
         items.append(item)
     return items
@@ -243,8 +247,15 @@ class PaymentProcessor:
         return self.client.post(
             f'/v2/checkout/orders/{order_id}/authorize', request_id=request_id or f'authorize-{order_id}')
 
-    def capture_authorization(self, authorization_id, invoice_id=None, request_id=None):
+    def capture_authorization(self, authorization_id, amount=None, currency=None, invoice_id=None,
+                              request_id=None):
+        """
+        Capture an authorization. With ``amount`` only that part is captured;
+        as this is always the final capture, PayPal releases the rest.
+        """
         body = {'final_capture': True}
+        if amount is not None:
+            body['amount'] = money(amount, currency)
         if invoice_id:
             body['invoice_id'] = str(invoice_id)
         return self.client.post(
