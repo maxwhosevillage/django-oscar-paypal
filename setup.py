@@ -8,8 +8,8 @@ setup(
     version=VERSION,
     url='https://github.com/django-oscar/django-oscar-paypal',
     description=(
-        "Integration with PayPal Express, PayPal Payflow Pro and Adaptive "
-        "Payments for django-oscar"),
+        "Integration with PayPal Checkout (Orders v2), PayPal Express and "
+        "PayPal Payflow Pro for django-oscar"),
     long_description=open('README.rst').read(),
     keywords="Payment, PayPal, Oscar",
     license='BSD',
@@ -17,13 +17,12 @@ setup(
     packages=find_packages(exclude=['sandbox*', 'tests*']),
     include_package_data=True,
     install_requires=[
-        'django>=2.2,<5.3',
-        'paypal-checkout-serversdk>=1.0.1',
+        'django>=4.2,<6.2',
         'requests>=2.26.0',
         'django-localflavor'
     ],
     extras_require={
-        'oscar': ['django-oscar>=2.0,<5.0']
+        'oscar': ['django-oscar>=3.2,<5.0']
     },
     # See http://pypi.python.org/pypi?%3Aaction=list_classifiers
     classifiers=[
@@ -35,11 +34,12 @@ setup(
         'Operating System :: Unix',
         'Programming Language :: Python',
         'Programming Language :: Python :: 3',
-        'Programming Language :: Python :: 3.6',
-        'Programming Language :: Python :: 3.7',
-        'Programming Language :: Python :: 3.8',
-        'Programming Language :: Python :: 3.9',
         'Programming Language :: Python :: 3.10',
         'Programming Language :: Python :: 3.11',
+        'Programming Language :: Python :: 3.12',
+        'Programming Language :: Python :: 3.13',
+        'Framework :: Django :: 4.2',
+        'Framework :: Django :: 5.2',
+        'Framework :: Django :: 6.0',
         'Topic :: Other/Nonlisted Topic'],
 )

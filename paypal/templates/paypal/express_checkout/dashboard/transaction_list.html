@@ -29,6 +29,7 @@
             <thead>
                 <tr>
                     <th>{% trans "Order ID" %}</th>
+                    <th>{% trans "Order number" %}</th>
                     <th>{% trans "Capture ID" %}</th>
                     <th>{% trans "Refund ID" %}</th>
                     <th>{% trans "Authorization ID" %}</th>
@@ -42,7 +43,8 @@
                 {% for txn in transactions %}
                     <tr>
                         <td><a href="{% url 'express_checkout_dashboard:paypal-transaction-detail' txn.id %}">{{ txn.order_id }}</a></td>
-                        <td>{{ txn.capture_id }}</td>
+                        <td>{{ txn.order_number }}</td>
+                        <td>{{ txn.capture_id }}{% if txn.capture_status %} ({{ txn.capture_status }}){% endif %}</td>
                         <td>{{ txn.refund_id }}</td>
                         <td>{{ txn.authorization_id }}</td>
                         <td>{{ txn.amount|currency:txn.currency }}</td>

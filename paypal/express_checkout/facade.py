@@ -1,13 +1,20 @@
+"""
+Transaction-level operations: every PayPal call made for an Oscar checkout
+goes through here and is recorded on an ``ExpressCheckoutTransaction``.
+"""
 import json
+import logging
+import uuid
 
 from django.conf import settings
-from django.contrib.sites.models import Site
 from django.core.exceptions import ImproperlyConfigured
-from django.urls import reverse
 from django.utils.translation import gettext_lazy as _
 
-from paypal.express_checkout.gateway import PaymentProcessor, buyer_pays_on_paypal
+from paypal.express_checkout.gateway import (
+    PaymentProcessor, build_experience_context, build_order_body, build_payer, build_purchase_unit, to_decimal)
 from paypal.express_checkout.models import ExpressCheckoutTransaction as Transaction
+
+logger = logging.getLogger('paypal.express_checkout')
 
 
 def get_intent():
@@ -18,136 +25,148 @@ def get_intent():
     return intent
 
 
-def get_paypal_url(basket, user=None, shipping_address=None, shipping_method=None, host=None):
+def get_currency(basket):
+    return basket.currency or getattr(settings, 'PAYPAL_CURRENCY', 'EUR')
+
+
+def create_order(
+        basket, order_total, shipping_charge=None, surcharges=None, shipping_address=None, billing_address=None,
+        email=None, order_number=None, absolute_uri=None, return_url=None, cancel_url=None, processor=None,
+):
     """
-    Return the URL for a PayPal Express transaction.
+    Register an order with PayPal and return the new transaction. The buyer
+    approves it with the PayPal JS SDK using ``transaction.order_id``.
 
-    This involves registering the txn with PayPal to get a one-time
-    URL.  If a shipping method and shipping address are passed, then these are
-    given to PayPal directly - this is used within when using PayPal as a
-    payment method.
+    ``order_total`` and ``shipping_charge`` are the incl. tax amounts.
     """
-
-    if basket.currency:
-        currency = basket.currency
-    else:
-        currency = getattr(settings, 'PAYPAL_CURRENCY', 'GBP')
-    if host is None:
-        host = Site.objects.get_current().domain
-
-    use_https = getattr(settings, 'PAYPAL_CALLBACK_HTTPS', True)
-    scheme = 'https' if use_https else 'http'
-
-    view_name = 'express-checkout-handle-order' if buyer_pays_on_paypal() else 'express-checkout-success-response'
-    return_url_path = reverse(view_name, kwargs={'basket_id': basket.id})
-    return_url = f'{scheme}://{host}{return_url_path}'
-
-    cancel_url_path = reverse('express-checkout-cancel-response', kwargs={'basket_id': basket.id})
-    cancel_url = f'{scheme}://{host}{cancel_url_path}'
-
-    address = None
-    if basket.is_shipping_required():
-        if shipping_address is not None:
-            address = shipping_address
-        elif user is not None:
-            addresses = user.addresses.all().order_by('-is_default_for_billing')
-            if addresses.exists():
-                address = addresses.first()
-
-    shipping_charge = None
-    order_total = basket.total_incl_tax
-    if shipping_method:
-        shipping_charge = shipping_method.calculate(basket).incl_tax
-        order_total += shipping_charge
-
+    currency = get_currency(basket)
     intent = get_intent()
-
-    result = PaymentProcessor().create_order(
-        basket=basket,
-        currency=currency,
-        return_url=return_url,
-        cancel_url=cancel_url,
-        order_total=order_total,
-        address=address,
+    purchase_unit = build_purchase_unit(
+        basket, currency, order_total,
         shipping_charge=shipping_charge,
-        intent=intent,
+        surcharges=surcharges,
+        shipping_address=shipping_address,
+        order_number=order_number,
+        absolute_uri=absolute_uri,
     )
+    body = build_order_body(
+        purchase_unit,
+        intent=intent,
+        experience_context=build_experience_context(shipping_address, return_url, cancel_url),
+        payer=build_payer(email, billing_address),
+    )
+    result = (processor or PaymentProcessor()).create_order(body, request_id=str(uuid.uuid4()))
 
-    Transaction.objects.create(
-        order_id=result.id,
-        amount=order_total,
+    txn = Transaction.objects.create(
+        order_id=result['id'],
+        order_number=order_number or '',
+        basket_id=basket.id,
+        amount=to_decimal(order_total),
         currency=currency,
-        status=result.status,
+        status=result['status'],
         intent=intent,
+        address_full_name=shipping_address.name if shipping_address is not None else '',
+        address=json.dumps(purchase_unit.get('shipping', {}).get('address', {})),
     )
-
-    for link in result.links:
-        if link.rel == 'approve':
-            return link.href
+    logger.info('Basket #%s: created PayPal order %s over %s %s', basket.id, txn.order_id, txn.amount, currency)
+    return txn
 
 
-def fetch_transaction_details(token):
+def _update_payer(txn, result):
     """
-    Fetch the details about the PayPal transaction.
+    Store payer details from an order/capture response.
     """
-
-    transaction = Transaction.objects.get(order_id=token)
-
-    if not transaction.payer_id:
-        result = PaymentProcessor().get_order(token)
-        transaction.payer_id = result.payer.payer_id
-        transaction.email = result.payer.email_address
-        transaction.status = result.status
-        try:
-            transaction.address_full_name = result.purchase_units[0].shipping.name.full_name
-            transaction.address = json.dumps(result.purchase_units[0].shipping.address.dict())
-        except AttributeError:
-            pass
-        transaction.save()
-
-    if transaction.is_authorization and not transaction.authorization_id:
-        result = PaymentProcessor().authorize_order(transaction.order_id)
-        transaction.authorization_id = result.purchase_units[0].payments.authorizations[0].id
-        transaction.status = result.status
-        transaction.save()
-
-    return transaction
+    source = result.get('payment_source', {}).get('paypal', {})
+    payer = result.get('payer', {})
+    txn.payer_id = source.get('account_id') or payer.get('payer_id') or txn.payer_id
+    txn.email = source.get('email_address') or payer.get('email_address') or txn.email
 
 
-def capture_order(token):
-    transaction = Transaction.objects.get(order_id=token)
-    if transaction.is_authorization:
-        capture_token = transaction.authorization_id
+def fetch_transaction_details(order_id, processor=None):
+    """
+    Refresh a transaction with the current order state from PayPal.
+    """
+    txn = Transaction.objects.get(order_id=order_id)
+    result = (processor or PaymentProcessor()).get_order(order_id)
+    _update_payer(txn, result)
+    txn.status = result['status']
+    txn.save()
+    return txn
+
+
+def get_approved_amount(order_id, processor=None):
+    """
+    Return ``(amount, currency)`` of the order as PayPal knows it.
+    """
+    result = (processor or PaymentProcessor()).get_order(order_id)
+    amount = result['purchase_units'][0]['amount']
+    return to_decimal(amount['value']), amount['currency_code'], result['status']
+
+
+def complete_payment(txn, processor=None):
+    """
+    Take the money for an approved order: capture it (intent CAPTURE) or
+    authorize it for a later capture (intent AUTHORIZE).
+
+    Raises ``PayPalError`` if PayPal refuses, e.g. with issue
+    ``INSTRUMENT_DECLINED`` when the buyer has to pick another funding source.
+    """
+    processor = processor or PaymentProcessor()
+    if txn.is_authorization:
+        result = processor.authorize_order(txn.order_id)
+        payment = result['purchase_units'][0]['payments']['authorizations'][0]
+        txn.authorization_id = payment['id']
     else:
-        capture_token = transaction.order_id
+        result = processor.capture_order(txn.order_id)
+        payment = result['purchase_units'][0]['payments']['captures'][0]
+        txn.capture_id = payment['id']
+        txn.capture_status = payment['status']
 
-    result = PaymentProcessor().capture_order(capture_token, transaction.intent)
-    capture_id = result.id if transaction.is_authorization else result.purchase_units[0].payments.captures[0].id
-    transaction.capture_id = capture_id
-    transaction.status = Transaction.COMPLETED
-    transaction.save()
-    return transaction
-
-
-def refund_order(token):
-    transaction = Transaction.objects.get(order_id=token)
-
-    result = PaymentProcessor().refund_order(transaction.capture_id, transaction.amount, transaction.currency)
-
-    transaction.refund_id = result.id
-    transaction.save()
-    return transaction
+    _update_payer(txn, result)
+    txn.status = result['status']
+    txn.save()
+    logger.info(
+        'PayPal order %s (order #%s): %s %s', txn.order_id, txn.order_number, txn.intent.lower(), payment['status'])
+    return txn
 
 
-def void_authorization(token):
+def capture_authorization(txn, processor=None):
+    result = (processor or PaymentProcessor()).capture_authorization(txn.authorization_id, txn.order_number)
+    txn.capture_id = result['id']
+    txn.capture_status = result['status']
+    txn.status = Transaction.COMPLETED
+    txn.save()
+    return txn
+
+
+def void_authorization(txn, processor=None):
+    (processor or PaymentProcessor()).void_authorization(txn.authorization_id)
+    txn.status = Transaction.VOIDED
+    txn.save()
+    return txn
+
+
+def refund(txn, amount=None, note_to_payer=None, processor=None):
     """
-    Void a previous authorization.
+    Refund (part of) a captured payment. Returns PayPal's refund resource.
     """
+    result = (processor or PaymentProcessor()).refund_capture(
+        txn.capture_id, amount=amount, currency=txn.currency, note_to_payer=note_to_payer,
+        request_id=str(uuid.uuid4()))
+    txn.refund_id = result['id']
+    txn.save()
+    logger.info('PayPal capture %s (order #%s): refunded %s', txn.capture_id, txn.order_number, amount or 'all')
+    return result
 
-    transaction = Transaction.objects.get(order_id=token)
 
-    PaymentProcessor().void_authorized_order(transaction.authorization_id)
-
-    transaction.status = Transaction.VOIDED
-    transaction.save()
-    return transaction
+def add_tracking(txn, tracking_number, carrier, carrier_name_other=None, notify_payer=False, processor=None):
+    """
+    Send the shipment's tracking number to PayPal.
+    """
+    (processor or PaymentProcessor()).add_tracking(
+        txn.order_id, txn.capture_id, tracking_number, carrier,
+        carrier_name_other=carrier_name_other, notify_payer=notify_payer)
+    txn.tracking_number = tracking_number
+    txn.carrier = carrier_name_other or carrier
+    txn.save()
+    return txn

@@ -1,0 +1,89 @@
+{% load i18n %}
+{% if sdk_url %}
+<div class="paypal-checkout" data-create-url="{% url 'express-checkout-create-order' %}"
+     data-capture-url="{% url 'express-checkout-capture-order' %}"
+     data-terms-checkbox="{{ terms_checkbox }}" data-csrf-token="{{ csrf_token }}">
+    <div class="paypal-checkout__error alert alert-danger" role="alert" hidden></div>
+    <div class="paypal-checkout__buttons"></div>
+</div>
+{{ button_style|json_script:"paypal-button-style" }}
+<script src="{{ sdk_url }}" data-namespace="paypalSdk"></script>
+<script>
+(function () {
+    var root = document.querySelector('.paypal-checkout');
+    var errorBox = root.querySelector('.paypal-checkout__error');
+    var terms = root.dataset.termsCheckbox ? document.querySelector(root.dataset.termsCheckbox) : null;
+    var genericError = "{% trans 'A problem occurred communicating with PayPal - please try again later' as msg %}{{ msg|escapejs }}";
+
+    function showError(message) {
+        errorBox.textContent = message || genericError;
+        errorBox.hidden = false;
+    }
+
+    function post(url, data) {
+        return fetch(url, {
+            method: 'POST',
+            credentials: 'same-origin',
+            headers: {'X-CSRFToken': root.dataset.csrfToken, 'Accept': 'application/json'},
+            body: new URLSearchParams(data || {})
+        }).then(function (response) {
+            return response.json();
+        });
+    }
+
+    if (!window.paypalSdk) {
+        showError();
+        return;
+    }
+
+    window.paypalSdk.Buttons({
+        style: JSON.parse(document.getElementById('paypal-button-style').textContent),
+        onClick: function (data, actions) {
+            errorBox.hidden = true;
+            if (terms && !terms.checked) {
+                terms.reportValidity();
+                return actions.reject();
+            }
+            return actions.resolve();
+        },
+        createOrder: function () {
+            // Errors are shown here rather than in onError: the SDK does not
+            // reliably pass a rejected createOrder on, and its own messages
+            // are not meant for buyers.
+            return post(root.dataset.createUrl).catch(function () {
+                return {};
+            }).then(function (data) {
+                if (data.redirect) {
+                    window.location.href = data.redirect;
+                }
+                if (!data.id) {
+                    showError(data.error);
+                    throw new Error(data.error || genericError);
+                }
+                return data.id;
+            });
+        },
+        onApprove: function (data, actions) {
+            return post(root.dataset.captureUrl, {order_id: data.orderID}).catch(function () {
+                return {};
+            }).then(function (result) {
+                if (result.restart) {
+                    showError(result.error);
+                    return actions.restart();
+                }
+                if (result.redirect) {
+                    window.location.href = result.redirect;
+                    return;
+                }
+                showError(result.error);
+            });
+        },
+        onError: function () {
+            if (errorBox.hidden) {
+                showError();
+            }
+        }
+    }).render(root.querySelector('.paypal-checkout__buttons'));
+})();
+</script>
+{% endif %}

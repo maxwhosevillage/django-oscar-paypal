@@ -13,9 +13,7 @@ urlpatterns += i18n_patterns(
     path('checkout/paypal/option-paypal/', include(buyer_pays_on_paypal_patterns)),
     path('checkout/paypal/option-website/', include(buyer_pays_on_website_patterns)),
 
-    path('checkout/paypal/express-checkout/', include(urls.base_patterns)),
-    path('checkout/paypal/express-checkout/option-paypal/', include(urls.buyer_pays_on_paypal_patterns)),
-    path('checkout/paypal/express-checkout/option-website/', include(urls.buyer_pays_on_website_patterns)),
+    path('checkout/paypal/express-checkout/', include(urls)),
 
     path('', include(apps.get_app_config("oscar").urls[0])),
 )

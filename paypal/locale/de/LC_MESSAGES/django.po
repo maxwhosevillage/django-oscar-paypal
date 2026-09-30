@@ -1,0 +1,26 @@
+msgid ""
+msgstr ""
+"Project-Id-Version: django-oscar-paypal\n"
+"Language: de\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Plural-Forms: nplurals=2; plural=(n != 1);\n"
+
+msgid "A problem occurred communicating with PayPal - please try again later"
+msgstr "Bei der Verbindung zu PayPal ist ein Problem aufgetreten. Bitte versuchen Sie es später erneut."
+
+msgid "Unable to determine PayPal transaction details"
+msgstr "Die PayPal-Zahlung konnte nicht zugeordnet werden. Bitte starten Sie die Zahlung erneut."
+
+msgid "No basket was found that corresponds to your PayPal transaction"
+msgstr "Zu dieser PayPal-Zahlung wurde kein Warenkorb gefunden. Bitte starten Sie die Zahlung erneut."
+
+msgid "Your basket has changed - please check your order and pay again"
+msgstr "Ihr Warenkorb hat sich geändert. Bitte prüfen Sie Ihre Bestellung und starten Sie die Zahlung erneut."
+
+msgid "Your payment was declined by PayPal - please choose another payment method"
+msgstr "PayPal hat die Zahlung abgelehnt. Bitte wählen Sie eine andere Zahlungsart."
+
+msgid "A problem occurred during payment capturing - please try again later"
+msgstr "Beim Abschluss der Zahlung ist ein Problem aufgetreten. Bitte versuchen Sie es später erneut."

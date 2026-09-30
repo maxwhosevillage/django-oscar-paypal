@@ -6,4 +6,5 @@ from . import methods as shipping_methods
 class Repository(BaseRepository):
     methods = (
         shipping_methods.SecondClassRecorded(),
+        shipping_methods.Standard(),
     )

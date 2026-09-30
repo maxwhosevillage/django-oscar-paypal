@@ -7,6 +7,7 @@ class TransactionListView(generic.ListView):
     model = models.ExpressCheckoutTransaction
     template_name = 'paypal/express_checkout/dashboard/transaction_list.html'
     context_object_name = 'transactions'
+    paginate_by = 50
 
 
 class TransactionDetailView(generic.DetailView):

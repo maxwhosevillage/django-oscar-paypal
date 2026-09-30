@@ -54,8 +54,60 @@ Tests
     :alt: Coverage
     :target: http://codecov.io/github/django-oscar/django-oscar-paypal?branch=master
 
+PayPal Checkout (Orders v2)
+---------------------------
+
+``paypal.express_checkout`` integrates the `PayPal JS SDK`_ buttons into the
+last step of Oscar's checkout. Shipping address and method are already known
+there, so PayPal gets the final amount, the line items, the shipping address
+(which the buyer cannot change on PayPal) and the order number as invoice id.
+The payment is captured while Oscar places the order - an order only exists
+once PayPal has taken the money.
+
+.. _`PayPal JS SDK`: https://developer.paypal.com/sdk/js/
+
+Setup::
+
+    # settings.py
+    INSTALLED_APPS += ['paypal']
+    PAYPAL_CLIENT_ID = '...'            # REST app credentials
+    PAYPAL_CLIENT_SECRET = '...'
+    PAYPAL_SANDBOX_MODE = True
+    # optional
+    PAYPAL_BRAND_NAME = 'My shop'
+    PAYPAL_LOCALE = 'de-DE'             # PayPal pages
+    PAYPAL_SDK_LOCALE = 'de_DE'         # buttons
+    PAYPAL_ORDER_INTENT = 'CAPTURE'     # or 'AUTHORIZE'
+    PAYPAL_ENABLE_FUNDING = 'paylater'
+    PAYPAL_DISABLE_FUNDING = 'card,sepa,venmo'
+    PAYPAL_ORDER_DESCRIPTION = 'Order {order_number}'
+    PAYPAL_SOFT_DESCRIPTOR = 'MYSHOP'   # max. 22 chars on the bank statement
+
+    # urls.py
+    path('checkout/paypal/', include('paypal.express_checkout.urls')),
+
+    {# checkout/preview.html #}
+    {% load paypal_tags %}
+    {% paypal_buttons "#terms-checkbox" %}
+
+After-sale operations live in ``paypal.express_checkout.facade``:
+``refund(txn, amount=None)``, ``add_tracking(txn, tracking_number, carrier)``,
+``capture_authorization(txn)`` and ``void_authorization(txn)``.
+
 Changelog
 ---------
+
+3.0.0 (unreleased)
+------------------
+* Rewrite ``paypal.express_checkout`` for PayPal Orders v2 with the JS SDK
+  buttons. Uses its own small REST client instead of the deprecated
+  ``paypal-checkout-serversdk``; the redirect based views are removed.
+* Send line items, a breakdown matching the order total, the shipping address
+  (``SET_PROVIDED_ADDRESS``), order number, payer prefill and experience
+  context to PayPal.
+* Idempotent captures via ``PayPal-Request-Id``; refunds and shipment tracking.
+* Add support for Django 6.0 and Oscar 4.2, drop Django < 4.2.
+* Escape PayPal response values in the dashboards.
 
 2.1.0 (unreleased)
 ------------------------------------
